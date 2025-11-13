@@ -118,6 +118,35 @@ async function run() {
           message: "Internal Server Error",
         });
       }
+
+      app.patch("/artwork/:id/favorite", async (req, res) => {
+        const { id } = req.params;
+        const { userEmail } = req.body;
+        const result = await artCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $addToSet: { favorited_by: userEmail } }
+        );
+        res.send({ success: result.modifiedCount > 0 });
+      });
+
+      app.patch("/favorites/:id/remove", async (req, res) => {
+        const { id } = req.params;
+        const { userEmail } = req.body;
+        const result = await artCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $pull: { favorited_by: userEmail } }
+        );
+        res.send({ success: result.modifiedCount > 0 });
+      });
+
+      app.get("/favorites", async (req, res) => {
+        const userEmail = req.query.email;
+        if (!userEmail) return res.send([]);
+        const result = await artCollection
+          .find({ favorited_by: userEmail })
+          .toArray();
+        res.send(result);
+      });
     });
 
     await client.db("admin").command({ ping: 1 });
