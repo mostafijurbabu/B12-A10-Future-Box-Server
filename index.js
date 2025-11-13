@@ -53,6 +53,33 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/my-gallery", async (req, res) => {
+      const userName = req.query.user;
+      if (!userName) return res.send([]);
+
+      const result = await artCollection
+        .find({ created_by: userName })
+        .toArray();
+
+      res.send(result);
+    });
+
+    app.delete("/artwork/:id", async (req, res) => {
+      const { id } = req.params;
+      const result = await artCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send({ success: result.deletedCount > 0 });
+    });
+
+    app.put("/artwork/:id", async (req, res) => {
+      const { id } = req.params;
+      const updatedData = req.body;
+      const result = await artCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updatedData }
+      );
+      res.send({ success: result.modifiedCount > 0 });
+    });
+
     app.post("/artwork", async (req, res) => {
       const data = req.body;
       const result = await artCollection.insertOne(data);
