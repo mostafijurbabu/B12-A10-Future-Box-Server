@@ -1,14 +1,17 @@
+// server.js
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.egme4zl.mongodb.net/?appName=Cluster0`;
+// MongoDB connection
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.egme4zl.mongodb.net/?retryWrites=true&w=majority`;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -20,150 +23,91 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
-
     const db = client.db("art-db");
     const artCollection = db.collection("artwork");
 
     app.get("/artwork", async (req, res) => {
-      const result = await artCollection.find().toArray();
-      res.send(result);
+      const artwork = await artCollection
+        .find()
+        .limit(6)
+        .sort({ title: -1 })
+        .toArray();
+      res.send(artwork);
     });
 
     app.get("/artwork/:id", async (req, res) => {
-      const { id } = req.params;
-      console.log(id);
-
-      const result = await artCollection.findOne({ _id: new ObjectId(id) });
-
-      res.send({
-        success: true,
-        result,
+      const result = await artCollection.findOne({
+        _id: new ObjectId(req.params.id),
       });
+      res.send({ success: !!result, result });
     });
 
-    app.get("/featured-artwork-section", async (req, res) => {
-      const result = await artCollection
-        .find()
-        .sort({ title: "desc" })
-        .limit(6)
-        .toArray();
-      console.log(result);
-
-      res.send(result);
-    });
-
-    app.get("/my-gallery", async (req, res) => {
-      const userName = req.query.user;
-      if (!userName) return res.send([]);
-
-      const result = await artCollection
-        .find({ created_by: userName })
-        .toArray();
-
-      res.send(result);
-    });
-
-    app.delete("/artwork/:id", async (req, res) => {
-      const { id } = req.params;
-      const result = await artCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send({ success: result.deletedCount > 0 });
+    app.post("/artwork", async (req, res) => {
+      const result = await artCollection.insertOne(req.body);
+      res.send({ success: true, result });
     });
 
     app.put("/artwork/:id", async (req, res) => {
-      const { id } = req.params;
-      const updatedData = req.body;
       const result = await artCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updatedData }
+        { _id: new ObjectId(req.params.id) },
+        { $set: req.body }
       );
       res.send({ success: result.modifiedCount > 0 });
     });
 
-    app.post("/artwork", async (req, res) => {
-      const data = req.body;
-      const result = await artCollection.insertOne(data);
-      res.send({
-        success: true,
-        result,
+    app.delete("/artwork/:id", async (req, res) => {
+      const result = await artCollection.deleteOne({
+        _id: new ObjectId(req.params.id),
       });
+      res.send({ success: result.deletedCount > 0 });
     });
 
     app.patch("/artwork/:id/like", async (req, res) => {
-      try {
-        const { id } = req.params;
-        const filter = { _id: new ObjectId(id) };
-
-        const updateDoc = {
-          $inc: { like: 1 },
-        };
-
-        const result = await artCollection.updateOne(filter, updateDoc);
-
-        if (result.modifiedCount > 0) {
-          res.send({
-            success: true,
-            message: "Like increased successfully!",
-          });
-        } else {
-          res.send({
-            success: false,
-            message: " No artwork found to update.",
-          });
-        }
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({
-          success: false,
-          message: "Internal Server Error",
-        });
-      }
-
-      app.patch("/artwork/:id/favorite", async (req, res) => {
-        const { id } = req.params;
-        const { userEmail } = req.body;
-        const result = await artCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $addToSet: { favorited_by: userEmail } }
-        );
-        res.send({ success: result.modifiedCount > 0 });
-      });
-
-      app.patch("/favorites/:id/remove", async (req, res) => {
-        const { id } = req.params;
-        const { userEmail } = req.body;
-        const result = await artCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $pull: { favorited_by: userEmail } }
-        );
-        res.send({ success: result.modifiedCount > 0 });
-      });
-
-      app.get("/favorites", async (req, res) => {
-        const userEmail = req.query.email;
-        if (!userEmail) return res.send([]);
-        const result = await artCollection
-          .find({ favorited_by: userEmail })
-          .toArray();
-        res.send(result);
-      });
+      const result = await artCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $inc: { like: 1 } }
+      );
+      res.send({ success: result.modifiedCount > 0 });
     });
 
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
+    app.patch("/artwork/:id/favorite", async (req, res) => {
+      const result = await artCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $addToSet: { favorited_by: req.body.userEmail } }
+      );
+      res.send({ success: result.modifiedCount > 0 });
+    });
+
+    app.patch("/favorites/:id/remove", async (req, res) => {
+      const result = await artCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $pull: { favorited_by: req.body.userEmail } }
+      );
+      res.send({ success: result.modifiedCount > 0 });
+    });
+
+    app.get("/favorites", async (req, res) => {
+      const email = req.query.email;
+      const favorites = await artCollection
+        .find({ favorited_by: email })
+        .toArray();
+      res.send(favorites);
+    });
+
+    app.get("/my-gallery", async (req, res) => {
+      const user = req.query.user;
+      const gallery = await artCollection.find({ created_by: user }).toArray();
+      res.send(gallery);
+    });
+
+    console.log("MongoDB Connected!");
+  } catch (err) {
+    console.log(err);
   }
 }
-run().catch(console.dir);
 
-app.get("/", (req, res) => {
-  res.send("Hello World!");
-});
+run();
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
+app.get("/", (req, res) => res.send("Server is running"));
+
+app.listen(port, () => console.log(`Server running on port ${port}`));
