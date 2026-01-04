@@ -1,10 +1,10 @@
-// server.js
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
 const app = express();
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
+
 const port = process.env.PORT || 5000;
 
 app.use(cors());
@@ -25,11 +25,13 @@ async function run() {
   try {
     const db = client.db("art-db");
     const artCollection = db.collection("artwork");
+    const paymentCollection = db.collection("payments");
 
+    // artwork related api
     app.get("/artwork", async (req, res) => {
       const artwork = await artCollection
         .find()
-        .limit(6)
+        .limit(12)
         .sort({ title: -1 })
         .toArray();
       res.send(artwork);
@@ -43,6 +45,8 @@ async function run() {
     });
 
     app.post("/artwork", async (req, res) => {
+      const artwork = req.body;
+      artwork.createdAt = new Date();
       const result = await artCollection.insertOne(req.body);
       res.send({ success: true, result });
     });
@@ -94,10 +98,78 @@ async function run() {
       res.send(favorites);
     });
 
-    app.get("/my-gallery", async (req, res) => {
+    app.get("/gallery", async (req, res) => {
       const user = req.query.user;
       const gallery = await artCollection.find({ created_by: user }).toArray();
       res.send(gallery);
+    });
+
+    // payment related api
+    app.post("/create-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.price) * 100;
+
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "USD",
+              unit_amount: amount,
+              product_data: {
+                name: paymentInfo.name,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        customer_email: paymentInfo.userEmail,
+        mode: "payment",
+        metadata: {
+          artId: paymentInfo.artId,
+        },
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+      });
+
+      console.log(session);
+      res.send({ url: session.url });
+    });
+
+    app.patch("/payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      console.log("session retrieve", session);
+      if (session.payment_status === "paid") {
+        const id = session.metadata.artId;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: {
+            paymentStatus: "paid",
+          },
+        };
+        const result = await artCollection.updateOne(query, update);
+
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          email: session.email,
+          artId: session.metadata.artId,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+        };
+
+        if (session.payment_status === "paid") {
+          const resultPayment = await paymentCollection.insertOne(payment);
+          res.send({
+            success: true,
+            modifyArtwork: result,
+            paymentInfo: resultPayment,
+          });
+        }
+      }
+
+      res.send({ success: false });
     });
 
     console.log("MongoDB Connected!");
@@ -108,6 +180,6 @@ async function run() {
 
 run();
 
-app.get("/", (req, res) => res.send("Server is running"));
+app.get("/", (req, res) => res.send("Server is now running"));
 
 app.listen(port, () => console.log(`Server running on port ${port}`));
